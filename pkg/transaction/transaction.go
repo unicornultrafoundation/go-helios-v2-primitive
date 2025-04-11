@@ -157,7 +157,7 @@ func (c *Coordinator) run() {
 	defer metricsTicker.Stop()
 
 	// Create a ticker for block creation
-	blockTicker := time.NewTicker(50 * time.Millisecond) // Fixed 50ms interval for more predictable block creation
+	blockTicker := time.NewTicker(300 * time.Millisecond) // Fixed 300ms interval for more predictable block creation
 	defer blockTicker.Stop()
 
 	for {
@@ -189,18 +189,46 @@ func (c *Coordinator) createBlock() error {
 		return nil
 	}
 
-	// Create a new block with the current transactions
-	block := model.NewBlock(c.blockHeight, c.txBuffer)
+	// Create a new block with transactions limited by max block size (2MB)
+	const maxBlockSize = 2 * 1024 * 1024 // Maximum block size in bytes (2MB)
+	var blockTxs []model.Transaction
+	var totalSize int
+
+	// Lock buffer for reading and writing
+	c.txMutex.Lock()
+	defer c.txMutex.Unlock()
+
+	// Take transactions that fit within the max block size
+	// Process as many transactions as possible within the size limit
+	for i := 0; i < len(c.txBuffer); i++ {
+		tx := c.txBuffer[i]
+		txSize := len(tx)
+
+		// Always include at least one transaction regardless of size
+		if len(blockTxs) == 0 || (totalSize+txSize <= maxBlockSize) {
+			blockTxs = append(blockTxs, tx)
+			totalSize += txSize
+		} else {
+			// Stop processing if we've reached the size limit
+			break
+		}
+	}
+
+	// Number of transactions processed
+	txProcessed := len(blockTxs)
+
+	// Create a new block with the selected transactions
+	block := model.NewBlock(c.blockHeight, blockTxs)
 	c.blockHeight++
 
 	// Update metrics
 	c.metrics.blockCount++
-	c.metrics.txProcessedCount += uint64(len(c.txBuffer))
+	c.metrics.txProcessedCount += uint64(txProcessed)
 	c.metrics.avgBlockSize = float64(c.metrics.txProcessedCount) / float64(c.metrics.blockCount)
 	c.metrics.blockCreationTime = uint64(time.Since(start).Nanoseconds())
 
-	// Clear the buffer
-	c.txBuffer = make([]model.Transaction, 0)
+	// Remove the processed transactions from the buffer
+	c.txBuffer = c.txBuffer[txProcessed:]
 
 	// Try to send the block, don't block if channel is full
 	select {

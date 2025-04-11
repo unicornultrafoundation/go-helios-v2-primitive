@@ -26,7 +26,7 @@ const (
 	TotalValidators  = 7
 
 	// Fixed transaction size
-	TransactionSize = 3 * 1024 // 3 KB in bytes ~ avg EVM tx size
+	TransactionSize = 3 * 1024 // 3KB per transaction
 )
 
 // Helper function to create a multi-node committee
