@@ -6,8 +6,8 @@ import (
 	"log"
 	"sync"
 
-	"github.com/lewtran/go-helios-v2/pkg/model"
-	"github.com/lewtran/go-helios-v2/pkg/network"
+	"github.com/unicornultrafoundation/go-helios-v2-primitive/pkg/model"
+	"github.com/unicornultrafoundation/go-helios-v2-primitive/pkg/network"
 )
 
 const (
@@ -31,10 +31,16 @@ type Coordinator struct {
 	dag         *DAG
 	round       model.Round
 	lastBlock   *model.BlockHash
+	mu          sync.RWMutex
 }
 
 // New creates a new consensus instance
 func New(nodeID model.ID, committee *model.Committee) *Coordinator {
+	return NewWithRound(nodeID, committee, 0)
+}
+
+// NewWithRound creates a new consensus instance with a specified initial round
+func NewWithRound(nodeID model.ID, committee *model.Committee, initialRound model.Round) *Coordinator {
 	ctx, stop := context.WithCancel(context.Background())
 
 	// Create genesis vertex
@@ -54,7 +60,7 @@ func New(nodeID model.ID, committee *model.Committee) *Coordinator {
 		ctx:         ctx,
 		stop:        stop,
 		dag:         NewDAG(genesis),
-		round:       0,
+		round:       initialRound,
 	}
 }
 
@@ -105,8 +111,17 @@ func (c *Coordinator) GetOutputChannel() chan *model.Vertex {
 	return c.outputCh
 }
 
-// HandleVertex handles a new vertex from the network
+// HandleVertex handles a vertex
 func (c *Coordinator) HandleVertex(vertex *model.Vertex) error {
+	// Check if context is cancelled first
+	select {
+	case <-c.ctx.Done():
+		return fmt.Errorf("context cancelled")
+	default:
+		// Context is not cancelled, proceed
+	}
+
+	// Try to send the vertex to the channel
 	select {
 	case c.vertexCh <- vertex:
 		return nil
@@ -115,10 +130,22 @@ func (c *Coordinator) HandleVertex(vertex *model.Vertex) error {
 	}
 }
 
-// HandleBlock handles a new block from the network
+// HandleBlock handles a block
 func (c *Coordinator) HandleBlock(block *model.Block) error {
+	// Check if context is cancelled first
+	select {
+	case <-c.ctx.Done():
+		return fmt.Errorf("context cancelled")
+	default:
+		// Context is not cancelled, proceed
+	}
+
+	log.Printf("HandleBlock called with height %d, hash %v", block.Height, *block.Hash())
+
+	// Try to send the block to the channel
 	select {
 	case c.blockCh <- block:
+		log.Printf("Block sent to channel for processing")
 		return nil
 	case <-c.ctx.Done():
 		return fmt.Errorf("context cancelled")
@@ -147,16 +174,20 @@ func (c *Coordinator) GetCommittee() *model.Committee {
 
 func (c *Coordinator) run() {
 	defer c.wg.Done()
+	log.Printf("Coordinator run loop started")
 
 	for {
 		select {
 		case <-c.ctx.Done():
+			log.Printf("Coordinator context done, exiting run loop")
 			return
 		case vertex := <-c.vertexCh:
+			log.Printf("Processing vertex from channel in round %d", vertex.Round())
 			if err := c.handleVertex(vertex); err != nil {
 				log.Printf("Error handling vertex: %v", err)
 			}
 		case block := <-c.blockCh:
+			log.Printf("Processing block from channel with height %d", block.Height)
 			if err := c.handleBlock(block); err != nil {
 				log.Printf("Error handling block: %v", err)
 			}
@@ -198,13 +229,23 @@ func (c *Coordinator) handleVertex(vertex *model.Vertex) error {
 }
 
 func (c *Coordinator) handleBlock(block *model.Block) error {
-	// Update round if necessary
-	if uint64(c.round) < block.Height {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Log block processing
+	log.Printf("Processing block: height=%d, hash=%v", block.Height, block.Hash())
+
+	// Update last block hash regardless of block height
+	c.lastBlock = block.Hash()
+
+	// Log last block update
+	log.Printf("Updated last block: %v", c.lastBlock)
+
+	// Update round if block height is greater than current round
+	if block.Height >= uint64(c.round) {
+		log.Printf("Updating round from %d to %d", c.round, block.Height)
 		c.round = model.Round(block.Height)
 	}
-
-	// Update last block hash
-	c.lastBlock = block.Hash()
 
 	return nil
 }
@@ -217,15 +258,28 @@ type messageHandler struct {
 func (h *messageHandler) HandleMessage(data []byte) error {
 	// Try to unmarshal as vertex first
 	vertex := &model.Vertex{}
-	if err := vertex.UnmarshalBinary(data); err == nil {
+	vertexErr := vertex.UnmarshalBinary(data)
+	if vertexErr == nil {
+		log.Printf("Received vertex message for round %d", vertex.Round())
 		return h.coordinator.HandleVertex(vertex)
 	}
+	log.Printf("Vertex unmarshal error: %v", vertexErr)
 
 	// Try to unmarshal as block
 	block := &model.Block{}
-	if err := block.UnmarshalBinary(data); err == nil {
+	blockErr := block.UnmarshalBinary(data)
+	if blockErr == nil {
+		log.Printf("Received block message with height %d", block.Height)
 		return h.coordinator.HandleBlock(block)
 	}
+	log.Printf("Block unmarshal error: %v", blockErr)
 
-	return fmt.Errorf("unknown message type")
+	// Log the data for debugging
+	if len(data) > 50 {
+		log.Printf("Message data (first 50 bytes): %x", data[:50])
+	} else {
+		log.Printf("Message data: %x", data)
+	}
+
+	return fmt.Errorf("unknown message type: %v, %v", vertexErr, blockErr)
 }

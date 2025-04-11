@@ -8,8 +8,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/lewtran/go-helios-v2/pkg/model"
-	"github.com/lewtran/go-helios-v2/pkg/network"
+	"github.com/unicornultrafoundation/go-helios-v2-primitive/cmd/benchmark/config"
+	"github.com/unicornultrafoundation/go-helios-v2-primitive/pkg/model"
+	"github.com/unicornultrafoundation/go-helios-v2-primitive/pkg/network"
 )
 
 // Metrics represents the current metrics of a transaction coordinator
@@ -190,7 +191,7 @@ func (c *Coordinator) createBlock() error {
 	}
 
 	// Create a new block with transactions limited by max block size (2MB)
-	const maxBlockSize = 2 * 1024 * 1024 // Maximum block size in bytes (2MB)
+	maxBlockSize := config.Config.BlockSize // Maximum block size in bytes (2MB)
 	var blockTxs []model.Transaction
 	var totalSize int
 
@@ -204,8 +205,8 @@ func (c *Coordinator) createBlock() error {
 		tx := c.txBuffer[i]
 		txSize := len(tx)
 
-		// Always include at least one transaction regardless of size
-		if len(blockTxs) == 0 || (totalSize+txSize <= maxBlockSize) {
+		// Only include transaction if it fits within the size limit
+		if totalSize+txSize <= maxBlockSize {
 			blockTxs = append(blockTxs, tx)
 			totalSize += txSize
 		} else {
@@ -313,14 +314,17 @@ func (c *Coordinator) printMetrics() {
 
 	// Calculate rates
 	txRate := float64(c.metrics.txReceivedCount) / duration
-	blockRate := float64(c.metrics.blockCount) / duration
+
+	// Calculate block rate based on the fixed interval (300ms)
+	// This gives us the theoretical maximum rate
+	blockRate := 1.0 / 0.3 // 300ms = 0.3 seconds
 
 	// Log metrics
 	log.Printf("Transaction Metrics: %d received (%.2f tx/s), %d processed, %d dropped, avg receive time: %.2f µs, avg buffer time: %.2f µs",
 		c.metrics.txReceivedCount, txRate, c.metrics.txProcessedCount, c.metrics.txDroppedCount,
 		avgTxReceiveTime/1000, avgTxBufferTime/1000)
 
-	log.Printf("Block Metrics: %d created (%.2f blocks/s), %d dropped, avg size: %.2f tx/block, avg creation time: %.2f ms, avg broadcast time: %.2f ms",
+	log.Printf("Block Metrics: %d created (max %.2f blocks/s), %d dropped, avg size: %.2f tx/block, avg creation time: %.2f ms, avg broadcast time: %.2f ms",
 		c.metrics.blockCount, blockRate, c.metrics.droppedBlockCount, c.metrics.avgBlockSize,
 		avgBlockCreationTime/1e6, avgBlockBroadcastTime/1e6)
 

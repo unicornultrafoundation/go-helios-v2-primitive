@@ -1,7 +1,9 @@
 package consensus
 
 import (
-	"github.com/lewtran/go-helios-v2/pkg/model"
+	"sync"
+
+	"github.com/unicornultrafoundation/go-helios-v2-primitive/pkg/model"
 )
 
 // DAG represents a directed acyclic graph of vertices
@@ -12,11 +14,16 @@ type DAG struct {
 	// Vertices by round
 	vertices map[model.Round]map[model.VertexHash]*model.Vertex
 
+	// Edges between vertices
+	edges map[model.VertexHash]map[model.VertexHash]struct{}
+
 	// Strong edges
 	strongEdges map[model.VertexHash]map[model.VertexHash]struct{}
 
 	// Weak edges
 	weakEdges map[model.VertexHash]map[model.VertexHash]struct{}
+
+	mu sync.RWMutex
 }
 
 // NewDAG creates a new DAG with a genesis vertex
@@ -24,6 +31,7 @@ func NewDAG(genesis *model.Vertex) *DAG {
 	dag := &DAG{
 		genesis:     genesis,
 		vertices:    make(map[model.Round]map[model.VertexHash]*model.Vertex),
+		edges:       make(map[model.VertexHash]map[model.VertexHash]struct{}),
 		strongEdges: make(map[model.VertexHash]map[model.VertexHash]struct{}),
 		weakEdges:   make(map[model.VertexHash]map[model.VertexHash]struct{}),
 	}
@@ -65,7 +73,8 @@ func (d *DAG) addWeakEdges(vertex *model.Vertex) {
 	for r := model.Round(1); r < vertex.Round()-2; r++ {
 		if vertices, ok := d.vertices[r]; ok {
 			for _, v := range vertices {
-				if !d.IsLinked(vertex, v) {
+				// Skip if there's a direct strong edge
+				if _, hasStrongEdge := d.strongEdges[vertex.Hash()][v.Hash()]; !hasStrongEdge {
 					d.weakEdges[vertex.Hash()][v.Hash()] = struct{}{}
 				}
 			}
@@ -142,6 +151,18 @@ func (d *DAG) IsLinked(v1, v2 *model.Vertex) bool {
 		}
 	}
 
+	// Add weak edges for vertices with round gaps > 2
+	if v1.Round() > v2.Round() && v1.Round()-v2.Round() > 2 {
+		if _, ok := d.vertices[v2.Round()][v2.Hash()]; ok {
+			// Add weak edge
+			if d.weakEdges[v1.Hash()] == nil {
+				d.weakEdges[v1.Hash()] = make(map[model.VertexHash]struct{})
+			}
+			d.weakEdges[v1.Hash()][v2.Hash()] = struct{}{}
+			return true
+		}
+	}
+
 	return false
 }
 
@@ -169,14 +190,21 @@ func (d *DAG) IsLinkedWithOthersInRound(vertex *model.Vertex, round model.Round)
 
 // GetWaveVertexLeader returns the leader vertex for a wave
 func (d *DAG) GetWaveVertexLeader(wave model.Wave) *model.Vertex {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
 	round := model.Round(wave * MaxWave)
-	if vertices, ok := d.vertices[round]; ok {
-		// Return the first vertex in the round as leader
-		for _, v := range vertices {
-			return v
-		}
+	if round == 0 {
+		return d.genesis
 	}
-	return nil
+
+	vertices := d.GetVerticesInRound(round)
+	if len(vertices) == 0 {
+		return nil
+	}
+
+	// Return the first vertex in the round as the leader
+	return vertices[0]
 }
 
 // GetVertices returns all vertices in the DAG

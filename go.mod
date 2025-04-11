@@ -1,4 +1,4 @@
-module github.com/lewtran/go-helios-v2
+module github.com/unicornultrafoundation/go-helios-v2-primitive
 
 go 1.23.0
 

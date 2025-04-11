@@ -134,8 +134,18 @@ func (v *Vertex) calculateHash() VertexHash {
 	// Write round
 	binary.Write(h, binary.BigEndian, v.round)
 
+	// Write wave
+	binary.Write(h, binary.BigEndian, v.Wave)
+
 	// Write block hash
-	h.Write(v.block.Hash()[:])
+	if v.block != nil {
+		blockHash := v.block.Hash()
+		h.Write(blockHash[:])
+	} else {
+		// Write zero hash if block is nil
+		var zeroHash BlockHash
+		h.Write(zeroHash[:])
+	}
 
 	// Write parents in sorted order for deterministic hashing
 	parentHashes := make([]VertexHash, 0, len(v.parents))
@@ -155,6 +165,9 @@ func (v *Vertex) calculateHash() VertexHash {
 		binary.Write(h, binary.BigEndian, v.parents[hash])
 	}
 
+	// Note: We don't include Timestamp in the hash calculation
+	// because it can change during serialization/deserialization
+
 	var hash VertexHash
 	copy(hash[:], h.Sum(nil))
 	return hash
@@ -167,10 +180,103 @@ func (v *Vertex) isPreviousRound(round Round) bool {
 
 // MarshalBinary implements the encoding.BinaryMarshaler interface
 func (v *Vertex) MarshalBinary() ([]byte, error) {
-	return json.Marshal(v)
+	type vertexJSON struct {
+		Hash      VertexHash       `json:"hash"`
+		Owner     string           `json:"owner"`
+		Block     *Block           `json:"block"`
+		Parents   map[string]Round `json:"parents"`
+		Round     Round            `json:"round"`
+		Wave      Wave             `json:"wave"`
+		Timestamp time.Time        `json:"timestamp"`
+	}
+
+	// Convert parents map to use base64-encoded strings as keys
+	parents := make(map[string]Round)
+	for hash, round := range v.parents {
+		parents[base64.StdEncoding.EncodeToString(hash[:])] = round
+	}
+
+	vj := vertexJSON{
+		Hash:      v.hash,
+		Owner:     base64.StdEncoding.EncodeToString(v.owner[:]),
+		Block:     v.block,
+		Parents:   parents,
+		Round:     v.round,
+		Wave:      v.Wave,
+		Timestamp: v.Timestamp,
+	}
+
+	return json.Marshal(vj)
 }
 
 // UnmarshalBinary implements the encoding.BinaryUnmarshaler interface
 func (v *Vertex) UnmarshalBinary(data []byte) error {
-	return json.Unmarshal(data, v)
+	type vertexJSON struct {
+		Hash      VertexHash       `json:"hash"`
+		Owner     string           `json:"owner"`
+		Block     *Block           `json:"block"`
+		Parents   map[string]Round `json:"parents"`
+		Round     Round            `json:"round"`
+		Wave      Wave             `json:"wave"`
+		Timestamp time.Time        `json:"timestamp"`
+	}
+
+	// Quick check for required fields in the JSON before unmarshaling
+	var rawMsg map[string]interface{}
+	if err := json.Unmarshal(data, &rawMsg); err != nil {
+		return err
+	}
+
+	// Check required vertex fields
+	requiredFields := []string{"owner", "round", "parents"}
+	for _, field := range requiredFields {
+		if _, exists := rawMsg[field]; !exists {
+			return fmt.Errorf("missing required vertex field: %s", field)
+		}
+	}
+
+	var vj vertexJSON
+	if err := json.Unmarshal(data, &vj); err != nil {
+		return err
+	}
+
+	// Initialize parents map if nil
+	if v.parents == nil {
+		v.parents = make(map[VertexHash]Round)
+	}
+
+	// Copy fields
+	v.hash = vj.Hash
+	ownerBytes, err := base64.StdEncoding.DecodeString(vj.Owner)
+	if err != nil {
+		return fmt.Errorf("invalid owner base64 encoding: %v", err)
+	}
+	copy(v.owner[:], ownerBytes)
+
+	v.block = vj.Block
+	v.round = vj.Round
+	v.Wave = vj.Wave
+	v.Timestamp = vj.Timestamp
+
+	// Convert parents map from base64-encoded strings back to VertexHash
+	for hashStr, round := range vj.Parents {
+		hashBytes, err := base64.StdEncoding.DecodeString(hashStr)
+		if err != nil {
+			return fmt.Errorf("invalid parent hash base64 encoding: %v", err)
+		}
+		var hash VertexHash
+		copy(hash[:], hashBytes)
+		v.parents[hash] = round
+	}
+
+	// Ensure block is properly initialized
+	if v.block != nil {
+		// Create a new block with the same data to ensure proper initialization
+		newBlock := NewBlock(v.block.Height, v.block.Transactions)
+		v.block = newBlock
+	}
+
+	// Recalculate vertex hash
+	v.hash = v.calculateHash()
+	return nil
 }

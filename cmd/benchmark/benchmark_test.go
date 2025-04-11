@@ -1,32 +1,14 @@
 package main
 
 import (
-	"fmt"
 	"net"
 	"testing"
 	"time"
 
-	"github.com/lewtran/go-helios-v2/pkg/model"
-	"github.com/lewtran/go-helios-v2/pkg/transaction"
 	"github.com/stretchr/testify/require"
-)
-
-const (
-	// Network configuration
-	BasePort     = uint16(15000)
-	PortsPerNode = uint16(3) // One port each for tx, block, and vertex
-	DefaultHost  = "0.0.0.0"
-
-	// Benchmark configuration
-	TxPerBlock       = 1000
-	BlockWaitTime    = 300 * time.Millisecond
-	ExtraWaitTime    = 5 * time.Second
-	ProgressInterval = time.Second
-	PollInterval     = 100 * time.Millisecond
-	TotalValidators  = 7
-
-	// Fixed transaction size
-	TransactionSize = 3 * 1024 // 3KB per transaction
+	"github.com/unicornultrafoundation/go-helios-v2-primitive/cmd/benchmark/config"
+	"github.com/unicornultrafoundation/go-helios-v2-primitive/pkg/model"
+	"github.com/unicornultrafoundation/go-helios-v2-primitive/pkg/transaction"
 )
 
 // Helper function to create a multi-node committee
@@ -36,49 +18,32 @@ func createTestCommittee(totalValidators int, basePort uint16) *model.Committee 
 	// Create validators with their addresses
 	for i := 0; i < totalValidators; i++ {
 		nodeID := model.ID(i + 1)
-		validator := committee.Validators[nodeID]
-		validator.TxAddress = &net.TCPAddr{
-			IP:   net.ParseIP(DefaultHost),
-			Port: int(basePort + uint16(i)*PortsPerNode),
+		validator := &model.Validator{
+			TxAddress: &net.TCPAddr{
+				IP:   net.ParseIP(config.Config.DefaultHost),
+				Port: int(basePort + uint16(i)*config.Config.PortsPerNode),
+			},
+			BlockAddress: &net.TCPAddr{
+				IP:   net.ParseIP(config.Config.DefaultHost),
+				Port: int(basePort + uint16(i)*config.Config.PortsPerNode + 1),
+			},
+			VertexAddress: &net.TCPAddr{
+				IP:   net.ParseIP(config.Config.DefaultHost),
+				Port: int(basePort + uint16(i)*config.Config.PortsPerNode + 2),
+			},
 		}
-		validator.BlockAddress = &net.TCPAddr{
-			IP:   net.ParseIP(DefaultHost),
-			Port: int(basePort + uint16(i)*PortsPerNode + 1),
-		}
-		validator.VertexAddress = &net.TCPAddr{
-			IP:   net.ParseIP(DefaultHost),
-			Port: int(basePort + uint16(i)*PortsPerNode + 2),
-		}
+		committee.Validators[nodeID] = validator
 	}
 
 	return committee
 }
 
-// createFixedSizeTransaction creates a transaction of exactly the specified size
-func createFixedSizeTransaction(index int) model.Transaction {
-	// Create base transaction with index
-	base := fmt.Sprintf("tx%d-", index)
-
-	// Create a byte slice of the required size
-	txData := make([]byte, TransactionSize)
-
-	// Copy the base into the beginning of the transaction
-	copy(txData, []byte(base))
-
-	// Fill the rest with a repeating pattern for padding
-	for i := len(base); i < TransactionSize; i++ {
-		txData[i] = byte('a' + (i % 26))
-	}
-
-	return txData
-}
-
 func BenchmarkMultiNodeTransactionProcessing(b *testing.B) {
-	committee := createTestCommittee(TotalValidators, BasePort)
+	committee := createTestCommittee(config.Config.TotalValidators, config.Config.BasePort)
 
 	// Create and start coordinators for each node
-	coordinators := make([]*transaction.Coordinator, TotalValidators)
-	for i := 0; i < TotalValidators; i++ {
+	coordinators := make([]*transaction.Coordinator, config.Config.TotalValidators)
+	for i := 0; i < config.Config.TotalValidators; i++ {
 		nodeID := model.ID(i + 1)
 		coordinator := transaction.New(nodeID, committee)
 		require.NotNil(b, coordinator)
@@ -95,26 +60,27 @@ func BenchmarkMultiNodeTransactionProcessing(b *testing.B) {
 
 	// Run b.N transactions, distributed across nodes
 	for i := 0; i < b.N; i++ {
-		tx := createFixedSizeTransaction(i)
+		tx := config.CreateFixedSizeTransaction(i)
 		// Round-robin distribution of transactions
-		nodeIdx := i % TotalValidators
+		nodeIdx := i % config.Config.TotalValidators
 		coordinators[nodeIdx].AddTransaction(tx)
-		if i%TxPerBlock == 0 {
+		if i%1000 == 0 {
 			b.Logf("Added %d transactions", i)
 		}
 	}
 
 	// Wait for blocks to be created
-	// Calculate wait time based on number of transactions
-	numBlocks := (b.N + TxPerBlock - 1) / TxPerBlock // Ceiling division
-	waitTime := time.Duration(numBlocks) * BlockWaitTime
-	waitTime += ExtraWaitTime
+	// Calculate number of blocks based on total data size and block size limit
+	totalDataSize := b.N * config.Config.TransactionSize
+	numBlocks := (totalDataSize + config.Config.BlockSize - 1) / config.Config.BlockSize // Ceiling division by block size
+	waitTime := time.Duration(numBlocks) * config.Config.BlockWaitTime
+	waitTime += config.Config.ExtraWaitTime
 
 	b.Logf("Waiting up to %v for %d transactions to be processed", waitTime, b.N)
 
 	// Keep checking until all transactions are processed or timeout
 	deadline := time.Now().Add(waitTime)
-	lastMetrics := make([]transaction.Metrics, TotalValidators)
+	lastMetrics := make([]transaction.Metrics, config.Config.TotalValidators)
 	lastPrint := time.Now()
 	totalProcessed := uint64(0)
 
@@ -139,7 +105,7 @@ func BenchmarkMultiNodeTransactionProcessing(b *testing.B) {
 		}
 
 		// Print progress every second
-		if time.Since(lastPrint) > ProgressInterval {
+		if time.Since(lastPrint) > config.Config.ProgressInterval {
 			b.Logf("Progress: %d/%d transactions processed (%.2f%%)", totalProcessed, b.N, float64(totalProcessed)*100/float64(b.N))
 			for i, coordinator := range coordinators {
 				b.Logf("Node %d metrics:", i+1)
@@ -152,7 +118,7 @@ func BenchmarkMultiNodeTransactionProcessing(b *testing.B) {
 			b.Logf("No progress in last iteration, waiting...")
 		}
 
-		time.Sleep(PollInterval)
+		time.Sleep(config.Config.PollInterval)
 	}
 
 	// Print final metrics for all nodes
@@ -172,13 +138,13 @@ func BenchmarkMultiNodeTransactionProcessing(b *testing.B) {
 
 	// Report custom metrics
 	b.ReportMetric(float64(totalProcessed)/b.Elapsed().Seconds(), "tx/sec")
-	b.ReportMetric(float64(totalProcessed)/float64(TotalValidators), "tx/node")
+	b.ReportMetric(float64(totalProcessed)/float64(config.Config.TotalValidators), "tx/node")
 }
 
 // Original single-node benchmark
 func BenchmarkTransactionProcessing(b *testing.B) {
 	nodeID := model.ID(1)
-	committee := createTestCommittee(1, BasePort)
+	committee := createTestCommittee(1, config.Config.BasePort)
 
 	coordinator := transaction.New(nodeID, committee)
 	require.NotNil(b, coordinator)
@@ -193,15 +159,16 @@ func BenchmarkTransactionProcessing(b *testing.B) {
 
 	// Run b.N transactions
 	for i := 0; i < b.N; i++ {
-		tx := createFixedSizeTransaction(i)
+		tx := config.CreateFixedSizeTransaction(i)
 		coordinator.AddTransaction(tx)
 	}
 
 	// Wait for blocks to be created
-	// Calculate wait time based on number of transactions
-	numBlocks := (b.N + TxPerBlock - 1) / TxPerBlock // Ceiling division
-	waitTime := time.Duration(numBlocks) * BlockWaitTime
-	waitTime += ExtraWaitTime
+	// Calculate number of blocks based on total data size and block size limit
+	totalDataSize := b.N * config.Config.TransactionSize
+	numBlocks := (totalDataSize + config.Config.BlockSize - 1) / config.Config.BlockSize // Ceiling division by block size
+	waitTime := time.Duration(numBlocks) * config.Config.BlockWaitTime
+	waitTime += config.Config.ExtraWaitTime
 
 	// Keep checking until all transactions are processed or timeout
 	deadline := time.Now().Add(waitTime)
@@ -215,7 +182,7 @@ func BenchmarkTransactionProcessing(b *testing.B) {
 		}
 
 		// Print progress every second
-		if time.Since(lastPrint) > ProgressInterval {
+		if time.Since(lastPrint) > config.Config.ProgressInterval {
 			b.Logf("Progress: %d/%d transactions processed", metrics.TxProcessedCount, b.N)
 			lastPrint = time.Now()
 		}
@@ -226,7 +193,7 @@ func BenchmarkTransactionProcessing(b *testing.B) {
 		}
 		lastMetrics = metrics
 
-		time.Sleep(PollInterval)
+		time.Sleep(config.Config.PollInterval)
 	}
 
 	// Print final metrics

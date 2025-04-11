@@ -7,8 +7,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/lewtran/go-helios-v2/pkg/model"
-	"github.com/lewtran/go-helios-v2/pkg/node"
+	"github.com/unicornultrafoundation/go-helios-v2-primitive/pkg/model"
+	"github.com/unicornultrafoundation/go-helios-v2-primitive/pkg/node"
 )
 
 func main() {

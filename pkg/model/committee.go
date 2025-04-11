@@ -80,7 +80,6 @@ func NewCommittee() *Committee {
 	}
 
 	// Generate genesis validators
-	basePort := uint16(15000) // Starting port number
 	numValidators := 7
 
 	for i := 1; i <= numValidators; i++ {
@@ -95,13 +94,8 @@ func NewCommittee() *Committee {
 		// Convert the seed to hex string for the validator
 		keypairHex := hex.EncodeToString(seed) + hex.EncodeToString(make([]byte, 32)) // Add padding to match expected length
 
-		// Assign sequential ports for each validator
-		portBase := basePort + uint16((i-1)*10)
-		txPort := portBase
-		blockPort := portBase + 1
-		vertexPort := portBase + 2
-
-		validator, err := NewValidator(keypairHex, txPort, txPort, blockPort, vertexPort)
+		// Use port 0 for dynamic port allocation
+		validator, err := NewValidator(keypairHex, 0, 0, 0, 0)
 		if err != nil {
 			panic(fmt.Sprintf("Failed to create validator: %v", err))
 		}

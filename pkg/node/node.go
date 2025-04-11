@@ -7,10 +7,10 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/lewtran/go-helios-v2/pkg/consensus"
-	"github.com/lewtran/go-helios-v2/pkg/model"
-	"github.com/lewtran/go-helios-v2/pkg/transaction"
-	"github.com/lewtran/go-helios-v2/pkg/vertex"
+	"github.com/unicornultrafoundation/go-helios-v2-primitive/pkg/consensus"
+	"github.com/unicornultrafoundation/go-helios-v2-primitive/pkg/model"
+	"github.com/unicornultrafoundation/go-helios-v2-primitive/pkg/transaction"
+	"github.com/unicornultrafoundation/go-helios-v2-primitive/pkg/vertex"
 )
 
 // Node represents a node in the Helios network
@@ -60,6 +60,11 @@ func New(id model.ID) *Node {
 
 // Start starts the node and all its components
 func (n *Node) Start() error {
+	// Check if already running
+	if n.IsRunning() {
+		return fmt.Errorf("node %d is already running", n.id)
+	}
+
 	log.Printf("Starting node %d", n.id)
 
 	// Create components

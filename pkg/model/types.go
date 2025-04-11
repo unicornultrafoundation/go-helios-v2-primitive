@@ -1,5 +1,10 @@
 package model
 
+import (
+	"encoding/base64"
+	"fmt"
+)
+
 const (
 	DefaultChannelCapacity = 1000
 )
@@ -21,3 +26,57 @@ type (
 	// Transaction represents a raw transaction as a byte slice
 	Transaction []byte
 )
+
+// MarshalJSON implements the json.Marshaler interface for NodePublicKey
+func (k NodePublicKey) MarshalJSON() ([]byte, error) {
+	return []byte(`"` + base64.StdEncoding.EncodeToString(k[:]) + `"`), nil
+}
+
+// UnmarshalJSON implements the json.Unmarshaler interface for NodePublicKey
+func (k *NodePublicKey) UnmarshalJSON(data []byte) error {
+	if len(data) < 2 || data[0] != '"' || data[len(data)-1] != '"' {
+		return fmt.Errorf("invalid NodePublicKey format")
+	}
+	decoded, err := base64.StdEncoding.DecodeString(string(data[1 : len(data)-1]))
+	if err != nil {
+		return fmt.Errorf("invalid base64 encoding: %v", err)
+	}
+	copy(k[:], decoded)
+	return nil
+}
+
+// MarshalJSON implements the json.Marshaler interface for VertexHash
+func (h VertexHash) MarshalJSON() ([]byte, error) {
+	return []byte(`"` + base64.StdEncoding.EncodeToString(h[:]) + `"`), nil
+}
+
+// UnmarshalJSON implements the json.Unmarshaler interface for VertexHash
+func (h *VertexHash) UnmarshalJSON(data []byte) error {
+	if len(data) < 2 || data[0] != '"' || data[len(data)-1] != '"' {
+		return fmt.Errorf("invalid VertexHash format")
+	}
+	decoded, err := base64.StdEncoding.DecodeString(string(data[1 : len(data)-1]))
+	if err != nil {
+		return fmt.Errorf("invalid base64 encoding: %v", err)
+	}
+	copy(h[:], decoded)
+	return nil
+}
+
+// MarshalJSON implements the json.Marshaler interface for BlockHash
+func (h BlockHash) MarshalJSON() ([]byte, error) {
+	return []byte(`"` + base64.StdEncoding.EncodeToString(h[:]) + `"`), nil
+}
+
+// UnmarshalJSON implements the json.Unmarshaler interface for BlockHash
+func (h *BlockHash) UnmarshalJSON(data []byte) error {
+	if len(data) < 2 || data[0] != '"' || data[len(data)-1] != '"' {
+		return fmt.Errorf("invalid BlockHash format")
+	}
+	decoded, err := base64.StdEncoding.DecodeString(string(data[1 : len(data)-1]))
+	if err != nil {
+		return fmt.Errorf("invalid base64 encoding: %v", err)
+	}
+	copy(h[:], decoded)
+	return nil
+}

@@ -3,7 +3,7 @@ package consensus
 import (
 	"sync"
 
-	"github.com/lewtran/go-helios-v2/pkg/model"
+	"github.com/unicornultrafoundation/go-helios-v2-primitive/pkg/model"
 )
 
 // State represents the consensus state
@@ -62,26 +62,27 @@ func (s *State) AddVertex(vertex *model.Vertex) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// If vertex is already delivered, ignore it
+	if _, ok := s.deliveredVertices[vertex.Hash()]; ok {
+		return
+	}
+
 	// Convert parents map to slice
 	parentHashes := make([]model.VertexHash, 0, len(vertex.Parents()))
 	for hash := range vertex.Parents() {
 		parentHashes = append(parentHashes, hash)
 	}
 
-	// Add to buffer if not ready
-	if vertex.Round() > s.currentRound || !s.dag.ContainsVertices(parentHashes) {
-		s.buffer = append(s.buffer, vertex)
+	// If vertex is for current round or earlier and all parents are present, add it
+	if vertex.Round() <= s.currentRound && s.dag.ContainsVertices(parentHashes) {
+		s.dag.InsertVertex(vertex)
+		s.deliveredVertices[vertex.Hash()] = struct{}{}
+		s.processBuffer()
 		return
 	}
 
-	// Add to DAG
-	s.dag.InsertVertex(vertex)
-
-	// Mark vertex as delivered
-	s.deliveredVertices[vertex.Hash()] = struct{}{}
-
-	// Process buffer
-	s.processBuffer()
+	// Otherwise, add to buffer
+	s.buffer = append(s.buffer, vertex)
 }
 
 // processBuffer processes vertices in the buffer
@@ -178,10 +179,11 @@ func (s *State) GetWaveVertexLeader(wave model.Wave) *model.Vertex {
 	defer s.mu.RUnlock()
 	round := s.GetRoundForWave(wave)
 	vertices := s.dag.GetVerticesInRound(round)
-	if len(vertices) > 0 {
-		return vertices[0]
+	if len(vertices) == 0 {
+		return nil
 	}
-	return nil
+	// Return the first vertex in the round as leader
+	return vertices[0]
 }
 
 // GetRoundForWave returns the round number for a wave
@@ -196,71 +198,23 @@ func (s *State) IsLastRoundInWave() bool {
 	return s.currentRound%MaxWave == MaxWave-1
 }
 
-// GetOrderedVertices returns vertices ordered by wave
+// GetOrderedVertices returns vertices in order for a wave
 func (s *State) GetOrderedVertices(wave model.Wave) []*model.Vertex {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
-	leader := s.GetWaveVertexLeader(wave)
-	if leader == nil {
-		return nil
-	}
+	// Get start and end rounds for the wave
+	startRound := s.GetRoundForWave(wave)
+	endRound := startRound + MaxWave - 1
 
-	round := s.GetRoundForWave(wave)
-	if !s.dag.IsLinkedWithOthersInRound(leader, round) {
-		return nil
-	}
-
-	ordered := make([]*model.Vertex, 0)
-	ordered = append(ordered, leader)
-
-	// Add all vertices linked to the leader
-	for round, vertices := range s.dag.GetVertices() {
-		if round > 0 {
-			for _, vertex := range vertices {
-				if !s.IsVertexDelivered(vertex.Hash()) && s.dag.IsLinked(vertex, leader) {
-					ordered = append(ordered, vertex)
-					s.MarkVertexDelivered(vertex.Hash())
-				}
-			}
+	// Collect vertices from all rounds in the wave
+	var result []*model.Vertex
+	for round := startRound; round <= endRound; round++ {
+		vertices := s.dag.GetVerticesInRound(round)
+		if vertices != nil {
+			result = append(result, vertices...)
 		}
 	}
 
-	return ordered
-}
-
-// getLeadersToCommit returns leaders that need to be committed
-func (s *State) getLeadersToCommit(fromWave model.Wave, currentLeader *model.Vertex) []*model.Vertex {
-	toCommit := []*model.Vertex{currentLeader}
-	current := currentLeader
-
-	for wave := fromWave; wave > 0; wave-- {
-		prevLeader := s.dag.GetWaveVertexLeader(wave)
-		if prevLeader != nil && s.dag.IsStronglyLinked(current, prevLeader) {
-			toCommit = append(toCommit, prevLeader)
-			current = prevLeader
-		}
-	}
-
-	return toCommit
-}
-
-// orderVertices orders vertices based on leaders
-func (s *State) orderVertices(leaders []*model.Vertex) []*model.Vertex {
-	ordered := make([]*model.Vertex, 0)
-
-	for _, leader := range leaders {
-		for round, vertices := range s.dag.GetVertices() {
-			if round > 0 {
-				for _, vertex := range vertices {
-					if !s.IsVertexDelivered(vertex.Hash()) && s.dag.IsLinked(vertex, leader) {
-						ordered = append(ordered, vertex)
-						s.MarkVertexDelivered(vertex.Hash())
-					}
-				}
-			}
-		}
-	}
-
-	return ordered
+	return result
 }

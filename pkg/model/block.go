@@ -13,7 +13,7 @@ import (
 // Block represents a block in the blockchain
 type Block struct {
 	// hash is the hash of this block
-	hash BlockHash `json:"hash"`
+	hash *BlockHash `json:"hash"`
 
 	// Height is the height of this block in the chain
 	Height uint64 `json:"height"`
@@ -32,7 +32,8 @@ func NewBlock(height uint64, transactions []Transaction) *Block {
 		Transactions: transactions,
 		Timestamp:    time.Now(),
 	}
-	b.hash = b.calculateHash()
+	hash := b.calculateHash()
+	b.hash = &hash
 	return b
 }
 
@@ -48,8 +49,8 @@ func (b *Block) calculateHash() BlockHash {
 		h.Write(tx)
 	}
 
-	// Write timestamp
-	binary.Write(h, binary.BigEndian, b.Timestamp.UnixNano())
+	// Note: We don't include Timestamp in the hash calculation
+	// because it can change during serialization/deserialization
 
 	var hash BlockHash
 	copy(hash[:], h.Sum(nil))
@@ -58,7 +59,11 @@ func (b *Block) calculateHash() BlockHash {
 
 // Hash returns a pointer to the block's hash
 func (b *Block) Hash() *BlockHash {
-	return &b.hash
+	if b.hash == nil {
+		hash := b.calculateHash()
+		b.hash = &hash
+	}
+	return b.hash
 }
 
 // String returns a string representation of the block
@@ -77,5 +82,10 @@ func (b *Block) MarshalBinary() ([]byte, error) {
 
 // UnmarshalBinary implements the encoding.BinaryUnmarshaler interface
 func (b *Block) UnmarshalBinary(data []byte) error {
-	return json.Unmarshal(data, b)
+	if err := json.Unmarshal(data, b); err != nil {
+		return err
+	}
+	hash := b.calculateHash()
+	b.hash = &hash
+	return nil
 }
