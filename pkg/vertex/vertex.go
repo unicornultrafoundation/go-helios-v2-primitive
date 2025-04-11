@@ -6,8 +6,8 @@ import (
 	"log"
 	"sync"
 
-	"github.com/lewtran/go-helios-v2/pkg/model"
-	"github.com/lewtran/go-helios-v2/pkg/network"
+	"github.com/unicornultrafoundation/go-helios-v2-primitive/pkg/model"
+	"github.com/unicornultrafoundation/go-helios-v2-primitive/pkg/network"
 )
 
 // Coordinator handles vertex broadcasting and receiving
