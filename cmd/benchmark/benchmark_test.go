@@ -123,10 +123,21 @@ func BenchmarkMultiNodeTransactionProcessing(b *testing.B) {
 
 	// Print final metrics for all nodes
 	b.Logf("Final metrics after %v:", time.Since(deadline.Add(-waitTime)))
+
+	// Calculate total and average metrics
+	var totalBlocks uint64
+
 	for i, coordinator := range coordinators {
 		b.Logf("Node %d metrics:", i+1)
 		coordinator.PrintMetrics()
+
+		// Get metrics from coordinator to calculate totals
+		metrics := coordinator.GetMetrics()
+		totalBlocks += metrics.BlockCount
 	}
+
+	// Calculate overall average block creation time
+	b.Logf("Total blocks created across all nodes: %d", totalBlocks)
 
 	// Verify all transactions were processed (or at least 99.99% for large tests)
 	percentComplete := float64(totalProcessed) / float64(b.N) * 100.0
@@ -139,6 +150,9 @@ func BenchmarkMultiNodeTransactionProcessing(b *testing.B) {
 	// Report custom metrics
 	b.ReportMetric(float64(totalProcessed)/b.Elapsed().Seconds(), "tx/sec")
 	b.ReportMetric(float64(totalProcessed)/float64(config.Config.TotalValidators), "tx/node")
+	if totalBlocks > 0 {
+		b.ReportMetric(float64(b.N)/float64(totalBlocks), "tx/block")
+	}
 }
 
 // Original single-node benchmark

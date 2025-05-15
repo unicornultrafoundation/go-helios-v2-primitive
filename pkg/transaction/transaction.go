@@ -99,7 +99,7 @@ func New(nodeID model.ID, committee *model.Committee) *Coordinator {
 		committee:         committee,
 		activeBuffer:      make([]model.Transaction, bufferSize),
 		backupBuffer:      make([]model.Transaction, bufferSize),
-		blockTransactions: make([]model.Transaction, 0, 1000), // Pre-allocate with max block size
+		blockTransactions: make([]model.Transaction, 0, 5000), // Pre-allocate with max block size
 		bufferSize:        bufferSize,
 		head:              0,
 		tail:              0,

@@ -115,13 +115,18 @@ You can modify the benchmark configuration in `cmd/benchmark/config/config.go` t
 
 ### Multi-Node Performance (10 validators)
 
-- **Transactions Processed**: 100,000
-- **Transaction Size**: 2KB per transaction
-- **Average Throughput**: ~65,661 transactions per second
-- **Time per Operation**: ~15,234 ns/op
-- **Transactions per Node**: 10,000 per node
+Tested on `Apple M2 Pro - 12 Cores (8+4) - 32GB Ram`
 
-The multi-node benchmark successfully processed all 100,000 transactions distributed across 10 nodes.
+- **Transactions Processed**: 1,000,000
+- **Transaction Size**: 2KB per transaction
+- **Average Throughput**: ~68,000 transactions per second
+- **Time per Operation**: ~14,285 ns/op
+- **Transactions per Node**: 100,000 per node
+- **Average Block Creation Time**: ~2 ms
+- **Total Blocks Created**: ~2,000 blocks across all nodes
+- **Average Transactions per Block**: ~500 transactions
+
+The multi-node benchmark successfully processed all 1,000,000 transactions distributed across 10 nodes with efficient block creation.
 
 ### Single-Node Performance
 

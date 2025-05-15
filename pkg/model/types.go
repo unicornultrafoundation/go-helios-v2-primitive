@@ -6,7 +6,7 @@ import (
 )
 
 const (
-	DefaultChannelCapacity = 1000
+	DefaultChannelCapacity = 10000
 )
 
 type (
